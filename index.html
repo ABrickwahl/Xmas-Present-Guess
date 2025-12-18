@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Handwriting Guess Game - Firebase</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Pacifico&family=Indie+Flower&family=Caveat&family=Lobster&family=Roboto&display=swap" rel="stylesheet">
+<style>
+body { font-family: Roboto, sans-serif; background:#f5f5f5; padding:20px; }
+h1 { margin-bottom:10px; }
+.card { background:white; padding:15px; border-radius:10px; box-shadow:0 4px 10px rgba(0,0,0,0.1); margin-bottom:15px; }
+input, select, button { padding:8px; margin:5px 0; }
+button { cursor:pointer; }
+canvas { border:1px solid #ccc; border-radius:6px; }
+.entry-card { font-size:26px; text-align:center; margin:15px 0; }
+.done { color: green; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>Handwriting Guess Game - Firebase</h1>
+
+<div class="card" id="roomCard">
+  <h3>Create or Join Room</h3>
+  <input id="playerName" placeholder="Your name" />
+  <input id="roomId" placeholder="Room code" />
+  <button onclick="joinRoom()">Join Room</button>
+</div>
+
+<div class="card" id="gameCard" style="display:none;">
+  <h3>Players</h3>
+  <ul id="players"></ul>
+</div>
+
+<div class="card" id="entryCard" style="display:none;">
+  <h3>Add Entry</h3>
+  <select id="entryAuthor"></select><br />
+  <input id="entryText" placeholder="Enter text" />
+  <select id="style">
+    <option value="font">Random Font</option>
+    <option value="handwriting">Handwriting</option>
+  </select><br />
+  <canvas id="canvas" width="300" height="150"></canvas><br />
+  <button onclick="clearCanvas()">Clear Drawing</button>
+  <button onclick="addEntry()">Add Entry</button>
+</div>
+
+<div class="card" id="playCard" style="display:none;">
+  <h3>Game</h3>
+  <button onclick="drawEntry()">Draw Random Entry</button>
+  <div id="entry"></div>
+  <select id="guess"></select>
+  <button onclick="submitGuess()">Guess</button>
+</div>
+
+<div class="card" id="remainingCard" style="display:none;">
+  Remaining entries: <span id="remaining">0</span>
+</div>
+
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyBcfYtibV2vzCG_rchAX8KqUnfJNbnpyQM",
+  authDomain: "xmas-guessing-game-e744e.firebaseapp.com",
+  projectId: "xmas-guessing-game-e744e",
+  storageBucket: "xmas-guessing-game-e744e.firebasestorage.app",
+  messagingSenderId: "324648115760",
+  appId: "1:324648115760:web:c51e7284128906138ad7f5",
+  measurementId: "G-XL91BHP4P4"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let roomRef;
+let playerName = '';
+let roomId = '';
+const fonts = ['Pacifico','Indie Flower','Caveat','Lobster','Roboto'];
+let currentEntry = null;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let drawing = false;
+
+canvas.addEventListener('mousedown', () => drawing = true);
+canvas.addEventListener('mouseup', () => { drawing = false; ctx.beginPath(); });
+canvas.addEventListener('mousemove', draw);
+
+function draw(e) {
+  if (!drawing) return;
+  const rect = canvas.getBoundingClientRect();
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+}
+
+function clearCanvas() { ctx.clearRect(0,0,canvas.width,canvas.height); }
+
+function joinRoom() {
+  playerName = document.getElementById('playerName').value.trim();
+  roomId = document.getElementById('roomId').value.trim();
+  if(!playerName || !roomId) return alert('Enter name and room code');
+
+  roomRef = db.collection('games').doc(roomId);
+
+  // Initialize room with this player if it doesn't exist
+  roomRef.set({ players: {[playerName]: {count:0}} }, { merge:true });
+
+  document.getElementById('roomCard').style.display='none';
+  document.getElementById('gameCard').style.display='block';
+  document.getElementById('entryCard').style.display='block';
+  document.getElementById('playCard').style.display='block';
+  document.getElementById('remainingCard').style.display='block';
+
+  listenUpdates();
+}
+
+function listenUpdates() {
+  roomRef.onSnapshot(snapshot => {
+    const data = snapshot.data();
+    updatePlayersList(data.players || {});
+    updateRemaining();
+  });
+}
+
+function updatePlayersList(players){
+  const list = document.getElementById('players');
+  list.innerHTML='';
+  const authorSelect = document.getElementById('entryAuthor');
+  const guessSelect = document.getElementById('guess');
+  authorSelect.innerHTML='';
+  guessSelect.innerHTML='';
+
+  for(const p in players){
+    const li = document.createElement('li');
+    li.textContent = `${p} (${players[p].count || 0}/3)`;
+    if(players[p].count>=3) li.className='done';
+    list.appendChild(li);
+
+    const o1 = document.createElement('option'); o1.value=p; o1.textContent=p; authorSelect.appendChild(o1);
+    const o2 = document.createElement('option'); o2.value=p; o2.textContent=p; guessSelect.appendChild(o2);
+  }
+}
+
+async function addEntry() {
+  const text = document.getElementById('entryText').value.trim();
+  const author = document.getElementById('entryAuthor').value;
+  const style = document.getElementById('style').value;
+  if(!text || !author) return;
+
+  const playerDoc = await roomRef.get();
+  const players = playerDoc.data().players || {};
+  if((players[author].count||0) >= 3) return alert(`${author} already entered 3 items`);
+
+  const entry = { text, author, style, in_play:true };
+  if(style==='handwriting') entry.image = canvas.toDataURL();
+  else entry.font = fonts[Math.floor(Math.random()*fonts.length)];
+
+  const entryRef = roomRef.collection('entries').doc();
+  await entryRef.set(entry);
+
+  // Increment player's count safely
+  await roomRef.update({ [`players.${author}.count`]: (players[author].count||0)+1 });
+
+  clearCanvas();
+  document.getElementById('entryText').value='';
+  updateRemaining();
+}
+
+async function drawEntry() {
+  const snapshot = await roomRef.collection('entries').where('in_play','==',true).get();
+  const entries = snapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
+  if(entries.length === 0) return alert('No entries left');
+
+  currentEntry = entries[Math.floor(Math.random()*entries.length)];
+  const div = document.getElementById('entry'); div.innerHTML='';
+
+  if(currentEntry.style==='handwriting'){
+    const img = document.createElement('img'); img.src = currentEntry.image; img.width=300; div.appendChild(img);
+  } else {
+    const p = document.createElement('div'); p.className='entry-card'; p.style.fontFamily=currentEntry.font; p.textContent=currentEntry.text; div.appendChild(p);
+  }
+}
+
+async function submitGuess() {
+  const guess = document.getElementById('guess').value;
+  if(!currentEntry || !guess) return;
+
+  if(guess === currentEntry.author) alert('Correct!');
+  else alert('Wrong! It was '+currentEntry.author);
+
+  // mark the entry as done
+  await roomRef.collection('entries').doc(currentEntry.id).update({ in_play:false });
+  currentEntry = null;
+  document.getElementById('entry').innerHTML='';
+  updateRemaining();
+}
+
+async function updateRemaining(){
+  const snapshot = await roomRef.collection('entries').where('in_play','==',true).get();
+  document.getElementById('remaining').innerText = snapshot.size;
+}
+</script>
+
+</body>
+</html>
