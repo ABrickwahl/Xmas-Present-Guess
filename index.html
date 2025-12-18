@@ -191,7 +191,7 @@ async function submitGuess() {
   if(!currentEntry || !guess) return;
 
   if(guess === currentEntry.author) alert('Correct!');
-  else alert('Wrong!);
+  else alert('Wrong!');
 
   // mark the entry as done
   await roomRef.collection('entries').doc(currentEntry.id).update({ in_play:false });
@@ -208,4 +208,5 @@ async function updateRemaining(){
 
 </body>
 </html>
+
 
